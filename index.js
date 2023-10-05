@@ -16,7 +16,7 @@ function ReplyMiddleware (req, res, next) {
         options.pretty = typeof options.pretty === 'boolean' ? options.pretty : true;
 
         if (response instanceof Error) {
-            res.writeHead(statusCode, {...headers, 'content-type':'application/json'});
+            res.writeHead(500, {'content-type':'application/json'});
             var reply = { 
                 code: 500, 
                 status: "error", 
@@ -24,8 +24,13 @@ function ReplyMiddleware (req, res, next) {
                 message: response.message,
             }
             //console.log('body', body);
-            (options.log === 'error' || options.log === 'all') && console.error(response);
+            if (options.log === 'error' || options.log === 'all') console.error(response);
             return res.end( options.pretty ? JSON.stringify(reply, null, 2): JSON.stringify(reply) ) 
+        }
+
+        if(isStream(response)){
+            if (options.log === 'all') console.error(`[${code}]`, "+-+ [STREAM] +-+");
+            return response.pipe(res);
         }
 
         let {statusCode, code, body, headers, format, props, noWrap} = response; 
@@ -43,20 +48,20 @@ function ReplyMiddleware (req, res, next) {
 
         if (typeof body === 'string' || body instanceof Buffer){
             // console.log("string or buffer body");
-            res.writeHead(statusCode, {...headers, 'content-type':'application/json'});
+            res.writeHead(code, {...headers, 'content-type':'application/json'});
             var reply = { 
                 code, 
                 status: "success", 
                 format: format || headers['content-type'] || (body instanceof Buffer ? "buffer" : "text/plain"), 
-                response: body,
+                response: [typeof body === 'string' ? body : Array.from(body) ],
 				...props
             }
-            (options.log === 'all') && console.error(`Success [${code}] [${reply.format}]`);
-            res.end( pretty ? JSON.stringify(reply, null, 2): JSON.stringify(reply) ) 
+            if (options.log === 'all') console.error(`Success [${code}] [${reply.format}]`);
+            res.end( options.pretty ? JSON.stringify(reply, null, 2): JSON.stringify(reply) ) 
         } 
         else if(body instanceof Error){
             // console.log("error body");
-            res.writeHead(statusCode, {...headers, 'content-type':'application/json'});
+            res.writeHead(code, {...headers, 'content-type':'application/json'});
             var reply = { 
                 code, 
                 status: "error", 
@@ -64,31 +69,31 @@ function ReplyMiddleware (req, res, next) {
                 message: body.message,
 				...props
             }
-            (options.log === 'error' || options.log === 'all') && console.error(`[${code}]`, body);
-            res.end( pretty ? JSON.stringify(reply, null, 2): JSON.stringify(reply) ) 
+            if (options.log === 'error' || options.log === 'all') console.error(`Error [${code}]`, body);
+            res.end( options.pretty ? JSON.stringify(reply, null, 2): JSON.stringify(reply) ) 
         }
-        else if(body instanceof stream.Readable || body instanceof stream.Duplex){
+        else if(isStream(body)){
             // headers['content-type'] = headers['content-type'] || 'application/octet-stream';
-            // res.writeHead(statusCode, headers);
-            (options.log === 'all') && console.error(`[${code}]`, "+-+ [STREAM] +-+");
+            // res.writeHead(code, headers);
+            if (options.log === 'all') console.error(`[${code}]`, "+-+ [STREAM] +-+");
             body.pipe(res);
         }
-		else if (body == null){
-            // Object.entries(headers).length && res.writeHead(statusCode, headers);
-            (options.log === 'all') && console.error(`[${code}] [${reply.format}]`);
-            res.writeHead(statusCode, headers);
-            res.end(JSON.stringify({ 
+		else if (body == null || isNaN(body)){
+            // Object.entries(headers).length && res.writeHead(code, headers);
+            (options.log === 'all') && console.error(`[${code}] [EMPTY BODY]`);
+            res.writeHead(code, headers);
+            var reply = { 
                 code, 
-                status: isSuccessCode(statusCode) ? "success" : "error", 
+                status: isSuccessCode(code) ? "success" : "error", 
                 format: "none" , 
                 ...props
-            }))
+            }
+            res.end( options.pretty ? JSON.stringify(reply, null, 2): JSON.stringify(reply) ) 
         }
         else {
-            // console.log("default body");
+            // JSON object
             //
-            (options.log === 'all') && console.error(`Success [${code}] [${reply.format}]`);
-            res.writeHead(statusCode, {...headers, 'content-type':'application/json'});
+            res.writeHead(code, {...headers, 'content-type':'application/json'});
             var reply = { 
                 code, 
                 status: "success", 
@@ -96,8 +101,8 @@ function ReplyMiddleware (req, res, next) {
                 response: body ,
 				...props
             }
-            (options.log === 'all') && console.error(`Success [${code}] [${reply.format}]`);
-            res.end( pretty ? JSON.stringify(reply, null, 2): JSON.stringify(reply) ) 
+            if (options.log === 'all') console.error(`Success [${code}] [${reply.format}]`);
+            res.end( options.pretty ? JSON.stringify(reply, null, 2): JSON.stringify(reply) ) 
         }
     }
     next();
